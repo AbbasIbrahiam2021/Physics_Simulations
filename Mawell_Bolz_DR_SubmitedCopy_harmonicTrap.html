@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Maxwell–Boltzmann: Harmonic Trap</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #f0f0f0; }
+    canvas { display: block; width: 100%; height: 100vh; }
+    .slider-container {
+      position: absolute; left: 10px; width: 220px;
+      background: rgba(255,255,255,0.8); padding: 5px;
+      margin-bottom: 5px; z-index: 10;
+      font-family: sans-serif; font-size: 14px;
+    }
+    #temperature-container { top: 10px; }
+    #spring-container      { top: 80px; }
+    #escape-container      { top: 150px; }
+  </style>
+
+  <!-- Import map for Three.js & OrbitControls -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.145.0/build/three.module.js",
+      "OrbitControls": "https://cdn.jsdelivr.net/npm/three@0.145.0/examples/jsm/controls/OrbitControls.js"
+    }
+  }
+  </script>
+  <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+
+  <!-- Sliders for Temperature, Spring constant, and Escape Speed -->
+  <div class="slider-container" id="temperature-container">
+    <label for="temperature">Temperature</label><br>
+    <input id="temperature" type="range" min="100" max="500" value="300">
+  </div>
+  <div class="slider-container" id="spring-container">
+    <label for="spring">Spring Constant (k)</label><br>
+    <input id="spring" type="range" min="0" max="50" value="10">
+  </div>
+  <div class="slider-container" id="escape-container">
+    <label for="escapeSpeed">Escape Speed</label><br>
+    <input id="escapeSpeed" type="range" min="0" max="0.5" step="0.01" value="0.2">
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'OrbitControls';
+
+    // Scene setup
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+    camera.position.set(0, 0, 5);
+
+    const renderer = new THREE.WebGLRenderer({
+      canvas: document.getElementById('canvas'), antialias: true
+    });
+    renderer.setSize(innerWidth, innerHeight);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0,0,0);
+    controls.update();
+
+    // Draw glowing wireframe box
+    const boxSizeX = 4, boxSizeY = 2, boxSizeZ = 2;
+    const containerGeom = new THREE.BoxGeometry(boxSizeX, boxSizeY, boxSizeZ);
+    const containerEdges = new THREE.EdgesGeometry(containerGeom);
+    const containerMaterial = new THREE.LineBasicMaterial({ color: 0xffffff });
+    const containerLines = new THREE.LineSegments(containerEdges, containerMaterial);
+    scene.add(containerLines);
+
+    // Collision bounds
+    const leftWall = -2, wallY = 1, wallZ = 1;
+
+    // --- Global speed scale so that the simulation is meaningful
+    const speedScale = 0.01;
+
+    // Create particles
+    const particles = [];
+    const numParticles = 200;
+    const initialTemperature = 300;
+    for (let i = 0; i < numParticles; i++) {
+      const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      const particle = new THREE.Mesh(
+        new THREE.SphereGeometry(0.1, 16, 16),
+        material
+      );
+      particle.mass = 1; particle.radius = 0.1;
+      particle.originalColor = new THREE.Color(0xffffff);
+
+      // Random start position inside the box
+      particle.position.set(
+        Math.random() * 3 - 1.5,
+        Math.random() * 2 - 1.0,
+        Math.random() * 2 - 1.0
+      );
+
+      // Initial velocity from Maxwell-Boltzmann distribution (Gaussian sampling)
+      const sigma = Math.sqrt(initialTemperature);
+      function randNormal() {
+        let u=0,v=0;
+        while(u===0) u=Math.random();
+        while(v===0) v=Math.random();
+        return Math.sqrt(-2*Math.log(u)) * Math.cos(2*Math.PI*v);
+      }
+      particle.velocity = new THREE.Vector3(randNormal(), randNormal(), randNormal()).multiplyScalar(sigma * speedScale);
+
+      particles.push(particle);
+      scene.add(particle);
+    }
+
+    // Parameters
+    let temperature = initialTemperature;
+    let k = parseFloat(document.getElementById('spring').value);
+    let escapeSpeed = parseFloat(document.getElementById('escapeSpeed').value);
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt = 0.016;
+
+      // Update particles
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const particle = particles[i];
+
+        // Harmonic trap force: F = -k * x (Hooke's law)
+        const Fspring = particle.position.clone().multiplyScalar(-k / particle.mass);
+        particle.velocity.addScaledVector(Fspring, dt);
+
+        // Update position
+        particle.position.addScaledVector(particle.velocity, dt);
+
+        // Escape condition or wall reflection
+        const speed = particle.velocity.length();
+        let escaped = false;
+        // X boundaries
+        if (particle.position.x - particle.radius < leftWall) {
+          if (speed > escapeSpeed) { escaped = true; }
+          else { particle.position.x = leftWall + particle.radius; particle.velocity.x *= -1; }
+        }
+        if (particle.position.x + particle.radius > -leftWall) {
+          if (speed > escapeSpeed) { escaped = true; }
+          else { particle.position.x = -leftWall - particle.radius; particle.velocity.x *= -1; }
+        }
+        // Y boundaries
+        if (particle.position.y - particle.radius < -wallY) {
+          if (speed > escapeSpeed) { escaped = true; }
+          else { particle.position.y = -wallY + particle.radius; particle.velocity.y *= -1; }
+        }
+        if (particle.position.y + particle.radius > wallY) {
+          if (speed > escapeSpeed) { escaped = true; }
+          else { particle.position.y = wallY - particle.radius; particle.velocity.y *= -1; }
+        }
+        // Z boundaries
+        if (particle.position.z - particle.radius < -wallZ) {
+          if (speed > escapeSpeed) { escaped = true; }
+          else { particle.position.z = -wallZ + particle.radius; particle.velocity.z *= -1; }
+        }
+        if (particle.position.z + particle.radius > wallZ) {
+          if (speed > escapeSpeed) { escaped = true; }
+          else { particle.position.z = wallZ - particle.radius; particle.velocity.z *= -1; }
+        }
+        if (escaped) {
+          scene.remove(particle);
+          particles.splice(i, 1);
+          continue;
+        }
+      }
+
+      // --- Particle-particle collisions (spatial partitioning) ---
+      const cellSize = 0.2;
+      const invCellSize = 1 / cellSize;
+      const grid = {};
+      // Assign particles to grid cells
+      for (let i = 0; i < particles.length; i++) {
+        const particleA = particles[i];
+        const ix = Math.floor((particleA.position.x - leftWall) * invCellSize);
+        const iy = Math.floor((particleA.position.y + wallY) * invCellSize);
+        const iz = Math.floor((particleA.position.z + wallZ) * invCellSize);
+        const key = `${ix},${iy},${iz}`;
+        if (!grid[key]) grid[key] = [];
+        grid[key].push(i);
+      }
+      // Check collisions within cells and neighboring cells
+      for (let i = 0; i < particles.length; i++) {
+        const particleA = particles[i];
+        const ix = Math.floor((particleA.position.x - leftWall) * invCellSize);
+        const iy = Math.floor((particleA.position.y + wallY) * invCellSize);
+        const iz = Math.floor((particleA.position.z + wallZ) * invCellSize);
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dz = -1; dz <= 1; dz++) {
+              const neighborKey = `${ix+dx},${iy+dy},${iz+dz}`;
+              const list = grid[neighborKey];
+              if (!list) continue;
+              for (const j of list) {
+                if (j <= i) continue;
+                const particleB = particles[j];
+                const distanceSquared = particleA.position.distanceToSquared(particleB.position);
+                const minDistance = particleA.radius + particleB.radius;
+                if (distanceSquared < minDistance * minDistance) {
+                  // Compute elastic collision response for equal-mass spheres
+                  const distance = Math.sqrt(distanceSquared);
+                  const normal = particleA.position.clone().sub(particleB.position).divideScalar(distance);
+                  const vA_n = particleA.velocity.dot(normal);
+                  const vB_n = particleB.velocity.dot(normal);
+                  // Tangential components
+                  const tangentA = particleA.velocity.clone().sub(normal.clone().multiplyScalar(vA_n));
+                  const tangentB = particleB.velocity.clone().sub(normal.clone().multiplyScalar(vB_n));
+                  // Swap normal components
+                  particleA.velocity.copy(tangentA.add(normal.clone().multiplyScalar(vB_n)));
+                  particleB.velocity.copy(tangentB.add(normal.clone().multiplyScalar(vA_n)));
+                  // Separate overlapping spheres
+                  const overlap = minDistance - distance;
+                  particleA.position.add(normal.clone().multiplyScalar(overlap / 2));
+                  particleB.position.sub(normal.clone().multiplyScalar(overlap / 2));
+                  // Collision flash
+                  particleA.material.color.set(0xff0000);
+                  particleB.material.color.set(0xff0000);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Fade collision highlight back to original color
+      particles.forEach(particle => {
+        particle.material.color.lerp(particle.originalColor, 0.05);
+      });
+
+      // Handle slider changes
+      const T = parseFloat(document.getElementById('temperature').value);
+      const K = parseFloat(document.getElementById('spring').value);
+      // Rescale velocities if temperature changed (thermal scaling)
+      if (!isNaN(T) && T !== temperature) {
+        const scale = Math.sqrt(T / temperature);
+        particles.forEach(p => p.velocity.multiplyScalar(scale));
+        temperature = T;
+      }
+      // Update spring constant
+      if (!isNaN(K)) k = K;
+      // Update escape speed threshold
+      const E = parseFloat(document.getElementById('escapeSpeed').value);
+      if (!isNaN(E)) escapeSpeed = E;
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // Responsive resizing
+    window.addEventListener('resize', () => {
+      camera.aspect = innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+  </script>
+</body>
+</html>

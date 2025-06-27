@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Ising Model</title>
+    <style>
+        body { 
+            margin: 0; 
+            font-family: sans-serif; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            background-color: #1f1f29; 
+            color: #fff; 
+            min-height: 100vh;
+        }
+        h1 { 
+            text-align: center; 
+            color: #efefff; 
+            margin-top: 15px;
+            margin-bottom: 10px;
+        }
+        .controls { 
+            margin-bottom: 15px;
+            padding: 10px; 
+            background-color: #2a2a3a; 
+            border-radius: 8px; 
+            display: flex; 
+            flex-wrap: wrap; 
+            gap: 15px 20px; 
+            justify-content: center; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            width: calc(95vw - 40px);
+            max-width: 1200px; 
+        }
+        .control-group label, .control-group span, .control-group button { 
+            margin-right: 5px; 
+            vertical-align: middle; 
+            font-size: 0.9em; 
+        }
+        .control-group button { 
+            padding: 5px 10px; 
+            background-color: #007bff; 
+            color: white; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+        }
+        .control-group button:hover { background-color: #0056b3; }
+        input[type="range"] { vertical-align: middle; width: 120px;}
+
+        #mainContainer {
+            display: flex;
+            flex-direction: row;
+            justify-content: center; 
+            align-items: stretch; 
+            width: 95vw; 
+            gap: 20px;
+            flex-grow: 1;
+            max-width: 1600px;
+        }
+
+        #canvasContainer { 
+            flex-basis: 0; 
+            flex-grow: 2.5; 
+            min-width: 450px; 
+            height: auto; 
+            border: 1px solid #444;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+            display: flex; 
+        }
+        #canvasContainer canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+
+        #infoPanes { 
+            display: flex;
+            flex-direction: column;
+            gap: 20px; 
+            flex-basis: 0; 
+            flex-grow: 1;  
+            min-width: 320px; 
+            max-width: 400px;
+        }
+
+        #infoPanes div { 
+            background-color: #2a2a3a;
+            padding:10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            display: flex; 
+            flex-direction: column;
+            flex-grow: 1; 
+        }
+
+        #infoPanes h3 {
+            margin-top:0;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+            text-align: center;
+            color: #ccc;
+        }
+
+        #infoPanes canvas {
+            border: 1px solid #555;
+            background-color: #1e1e28;
+            display: block;
+            width: 100%; 
+            height: 0; 
+            flex-grow: 1; 
+        }
+    </style>
+
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.145.0/build/three.module.js",
+            "OrbitControls": "https://cdn.jsdelivr.net/npm/three@0.145.0/examples/jsm/controls/OrbitControls.js"
+        }
+    }
+    </script>
+</head>
+
+<body>
+    <h1>3D Ising Model</h1>
+
+    <div class="controls">
+        <div class="control-group">
+            <label for="bFieldSlider">Magnetic Field (B):</label>
+            <input type="range" id="bFieldSlider" min="-1.0" max="1.0" value="0.0" step="0.05">
+            <span id="bFieldValue">B = 0.00</span>
+        </div>
+        <div class="control-group">
+            <label for="tempSlider">Temperature (T):</label>
+            <input type="range" id="tempSlider" min="0.1" max="5.0" value="2.5" step="0.05">
+            <span id="tempValue">T = 2.50</span>
+        </div>
+        <div class="control-group">
+            <button id="resetButton">Reset Spins</button>
+        </div>
+        <div class="control-group">
+            <button id="slowMotionButton">Toggle Slow Motion (Off)</button>
+        </div>
+        <div class="control-group">
+            <span id="magnetizationDisplay">Magnetization: N/A</span>
+        </div>
+    </div>
+
+    <div id="mainContainer">
+        <div id="canvasContainer"></div> <div id="infoPanes">
+            <div>
+                <h3>Magnetization / Time</h3>
+                <canvas id="magnetizationCanvas" width="300" height="220"></canvas>
+            </div>
+            <div>
+                <h3>Energy per Spin / Time</h3>
+                <canvas id="energyCanvas" width="300" height="220"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'OrbitControls';
+
+        let scene, camera, renderer, controls;
+        let spinCubes = [];
+
+        const N = 10;
+        const J = 1.0;
+        let T_sim = 2.5;
+        let B_field_sim = 0.0;
+
+        let spins;
+        const cubeSize = 0.8;
+        const spacing = 1.0;
+
+        const baseEmissiveIntensity = 0.05;
+        const flipEmissiveIntensity = 0.5;
+        const glowDecayRate = 0.1;
+
+        const materialSpinUp = new THREE.MeshStandardMaterial({
+            color: 0x0077ff, metalness: 0.4, roughness: 0.5,
+            emissive: 0x0033aa, emissiveIntensity: baseEmissiveIntensity
+        });
+        const materialSpinDown = new THREE.MeshStandardMaterial({
+            color: 0xff4444, metalness: 0.4, roughness: 0.5,
+            emissive: 0xaa3333, emissiveIntensity: baseEmissiveIntensity
+        });
+
+        let bFieldSlider, bFieldValueSpan, tempSlider, tempValueSpan;
+        let resetButton, magnetizationDisplaySpan, slowMotionButton;
+
+        let isSlowMotionActive = false;
+        const slowMotionFactor = 5;
+        let animationFrameCount = 0;
+
+        let magnetizationCanvas, magCtx, energyCanvas, energyCtx;
+        const historyLength = 150; 
+        let magnetizationHistory = [];
+        let energyHistory = [];
+
+        function initThreeJS() {
+            const container = document.getElementById('canvasContainer');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a2a);
+            camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 1000);
+            const gridCenter = new THREE.Vector3(0, 0, 0);
+            const maxGridDimension = N * spacing;
+            camera.position.set(maxGridDimension * 0.9, maxGridDimension * 0.9, maxGridDimension * 1.7);
+            camera.lookAt(gridCenter);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement); 
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.target.copy(gridCenter);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.update();
+            const ambientLight = new THREE.AmbientLight(0xddddff, 0.6);
+            scene.add(ambientLight);
+            const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.7);
+            directionalLight1.position.set(5, 10, 7.5);
+            scene.add(directionalLight1);
+            const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4);
+            directionalLight2.position.set(-5, -5, -7.5);
+            scene.add(directionalLight2);
+            window.addEventListener('resize', onWindowResize, false);
+            onWindowResize(); 
+        }
+
+        function onWindowResize() {
+            const container = document.getElementById('canvasContainer');
+            if (!container || !camera || !renderer) return;
+            
+            const newWidth = container.clientWidth;
+            const newHeight = container.clientHeight;
+
+            camera.aspect = newWidth / newHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(newWidth, newHeight);
+        }
+
+        function setupDOMControls() {
+            bFieldSlider = document.getElementById('bFieldSlider');
+            bFieldValueSpan = document.getElementById('bFieldValue');
+            tempSlider = document.getElementById('tempSlider');
+            tempValueSpan = document.getElementById('tempValue');
+            resetButton = document.getElementById('resetButton');
+            magnetizationDisplaySpan = document.getElementById('magnetizationDisplay');
+            slowMotionButton = document.getElementById('slowMotionButton');
+
+            bFieldSlider.addEventListener('input', (event) => {
+                B_field_sim = parseFloat(event.target.value);
+                bFieldValueSpan.textContent = `B = ${B_field_sim.toFixed(2)}`;
+            });
+            B_field_sim = parseFloat(bFieldSlider.value);
+            bFieldValueSpan.textContent = `B = ${B_field_sim.toFixed(2)}`;
+
+            tempSlider.addEventListener('input', (event) => {
+                T_sim = parseFloat(event.target.value);
+                if (T_sim <= 0) T_sim = 0.0001;
+                tempValueSpan.textContent = `T = ${T_sim.toFixed(2)}`;
+            });
+            T_sim = parseFloat(tempSlider.value);
+            tempValueSpan.textContent = `T = ${T_sim.toFixed(2)}`;
+
+            resetButton.addEventListener('click', () => {
+                initializeSpins3D();
+                updateCubeVisuals();
+            });
+
+            slowMotionButton.addEventListener('click', () => {
+                isSlowMotionActive = !isSlowMotionActive;
+                slowMotionButton.textContent = `Toggle Slow Motion (${isSlowMotionActive ? "On" : "Off"})`;
+                animationFrameCount = 0;
+            });
+
+            magnetizationCanvas = document.getElementById('magnetizationCanvas');
+            if (magnetizationCanvas) magCtx = magnetizationCanvas.getContext('2d');
+            
+            energyCanvas = document.getElementById('energyCanvas');
+            if (energyCanvas) energyCtx = energyCanvas.getContext('2d');
+        }
+
+        function initializeSpins3D() {
+            spins = new Array(N);
+            for (let i = 0; i < N; i++) {
+                spins[i] = new Array(N);
+                for (let j = 0; j < N; j++) {
+                    spins[i][j] = new Array(N);
+                    for (let k = 0; k < N; k++) {
+                        spins[i][j][k] = Math.random() < 0.5 ? 1 : -1;
+                        if (spinCubes[i]?.[j]?.[k]) {
+                           spinCubes[i][j][k].currentGlowIntensity = baseEmissiveIntensity;
+                        }
+                    }
+                }
+            }
+            magnetizationHistory = [];
+            energyHistory = [];
+            if (spins) { updateDataHistory(); }
+        }
+
+        function createSpinCubes() {
+            const geometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
+            const centerOffset = (N - 1) * spacing / 2;
+            for (let i = 0; i < N; i++) {
+                spinCubes[i] = new Array(N);
+                for (let j = 0; j < N; j++) {
+                    spinCubes[i][j] = new Array(N);
+                    for (let k = 0; k < N; k++) {
+                        const material = spins[i][j][k] === 1 ? materialSpinUp : materialSpinDown;
+                        const cube = new THREE.Mesh(geometry, material.clone());
+                        cube.position.set(i * spacing - centerOffset, j * spacing - centerOffset, k * spacing - centerOffset);
+                        cube.currentGlowIntensity = baseEmissiveIntensity;
+                        scene.add(cube);
+                        spinCubes[i][j][k] = cube;
+                    }
+                }
+            }
+        }
+
+        function updateCubeVisuals() {
+            for (let i = 0; i < N; i++) {
+                for (let j = 0; j < N; j++) {
+                    for (let k = 0; k < N; k++) {
+                        const cube = spinCubes[i]?.[j]?.[k];
+                        if (cube) {
+                            const targetBaseMaterial = spins[i][j][k] === 1 ? materialSpinUp : materialSpinDown;
+                            if (cube.material.color.getHex() !== targetBaseMaterial.color.getHex()) {
+                                cube.material = targetBaseMaterial.clone();
+                                cube.currentGlowIntensity = baseEmissiveIntensity;
+                            }
+                            if (cube.currentGlowIntensity > baseEmissiveIntensity) {
+                                cube.material.emissiveIntensity = cube.currentGlowIntensity;
+                                cube.currentGlowIntensity -= glowDecayRate;
+                                if (cube.currentGlowIntensity < baseEmissiveIntensity) {
+                                    cube.currentGlowIntensity = baseEmissiveIntensity;
+                                }
+                            } else {
+                                cube.material.emissiveIntensity = baseEmissiveIntensity;
+                                cube.currentGlowIntensity = baseEmissiveIntensity; 
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        function calculateTotalEnergy3D() {
+            let interactionEnergy = 0; let fieldEnergy = 0;
+            for (let i = 0; i < N; i++) {
+            for (let j = 0; j < N; j++) {
+            for (let k = 0; k < N; k++) {
+                const spin_ijk = spins[i][j][k];
+                fieldEnergy += -B_field_sim * spin_ijk;
+                interactionEnergy += -J * spin_ijk * spins[(i + 1) % N][j][k];
+                interactionEnergy += -J * spin_ijk * spins[i][(j + 1) % N][k];
+                interactionEnergy += -J * spin_ijk * spins[i][j][(k + 1) % N];
+            }}}
+            return interactionEnergy + fieldEnergy;
+        }
+
+        function updateDataHistory() {
+            let totalSpin = 0;
+            for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) for (let k = 0; k < N; k++) totalSpin += spins[i][j][k];
+            const currentM = totalSpin / (N * N * N);
+            magnetizationHistory.push(currentM);
+            if (magnetizationHistory.length > historyLength) magnetizationHistory.shift();
+            if (magnetizationDisplaySpan) magnetizationDisplaySpan.textContent = `Magnetization: ${currentM.toFixed(3)}`;
+            const currentE = calculateTotalEnergy3D() / (N*N*N);
+            energyHistory.push(currentE);
+            if (energyHistory.length > historyLength) energyHistory.shift();
+        }
+
+        function drawGraph(ctx, canvas, data, label, minY, maxY, color) {
+            if (!ctx || !canvas || !canvas.parentElement) return; // Ensure parent exists for width
+            
+
+            const actualWidth = canvas.width; 
+            const actualHeight = canvas.height; 
+
+            ctx.clearRect(0, 0, actualWidth, actualHeight);
+            const axisColor = '#777'; const textColor = '#ccc'; const font = '10px Arial';
+            const padding = { top: 20, right: 10, bottom: 20, left: 30 }; 
+
+            ctx.strokeStyle = axisColor; ctx.lineWidth = 1; ctx.beginPath();
+            ctx.moveTo(padding.left, padding.top); ctx.lineTo(padding.left, actualHeight - padding.bottom); 
+            ctx.lineTo(actualWidth - padding.right, actualHeight - padding.bottom); 
+            ctx.stroke();
+
+            ctx.fillStyle = textColor; ctx.font = font;
+            ctx.textAlign = 'center'; ctx.fillText(label, padding.left + (actualWidth - padding.left - padding.right) / 2, padding.top - 5); 
+            ctx.textAlign = 'right';
+            ctx.fillText(maxY.toFixed(1), padding.left - 5, padding.top + 3);
+            ctx.fillText(minY.toFixed(1), padding.left - 5, actualHeight - padding.bottom); 
+            ctx.fillText(((minY + maxY) / 2).toFixed(1), padding.left - 5, padding.top + (actualHeight - padding.top - padding.bottom) / 2 + 3); 
+
+            if (data.length > 0) {
+                ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
+                const yRange = maxY - minY === 0 ? 1 : maxY - minY;
+                const plotHeight = actualHeight - padding.top - padding.bottom;
+                const plotWidth = actualWidth - padding.left - padding.right;
+                data.forEach((value, index) => {
+                    const x = padding.left + (index / Math.max(1, historyLength - 1)) * plotWidth;
+                    const y_val = Math.max(minY, Math.min(maxY, value));
+                    const y = padding.top + plotHeight - ((y_val - minY) / yRange) * plotHeight; 
+                    if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                });
+                ctx.stroke();
+            }
+        }
+
+        function calculateEnergyChange3D(x, y, z) {
+            const currentSpin = spins[x][y][z]; let sumNeighborSpins = 0;
+            sumNeighborSpins += spins[(x - 1 + N) % N][y][z]; sumNeighborSpins += spins[(x + 1) % N][y][z];
+            sumNeighborSpins += spins[x][(y - 1 + N) % N][z]; sumNeighborSpins += spins[x][(y + 1) % N][z];
+            sumNeighborSpins += spins[x][y][(z - 1 + N) % N]; sumNeighborSpins += spins[x][y][(z + 1) % N];
+            const delta_E = 2 * currentSpin * (J * sumNeighborSpins + B_field_sim); return delta_E;
+        }
+
+        function metropolisStep3D() {
+            if (T_sim <= 0) return;
+            for (let S_idx = 0; S_idx < N * N * N; S_idx++) {
+                const r_x = Math.floor(Math.random() * N); const r_y = Math.floor(Math.random() * N); const r_z = Math.floor(Math.random() * N);
+                const delta_E = calculateEnergyChange3D(r_x, r_y, r_z); let flipped = false;
+                if (delta_E < 0) { spins[r_x][r_y][r_z] *= -1; flipped = true;
+                } else if (Math.random() < Math.exp(-delta_E / T_sim)) { spins[r_x][r_y][r_z] *= -1; flipped = true; }
+                if (flipped) { const cube = spinCubes[r_x]?.[r_y]?.[r_z]; if (cube) cube.currentGlowIntensity = flipEmissiveIntensity; }
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            animationFrameCount++;
+            let simulationStepped = false;
+            if (isSlowMotionActive) {
+                if (animationFrameCount % slowMotionFactor === 0) { metropolisStep3D(); simulationStepped = true; }
+            } else { metropolisStep3D(); simulationStepped = true; }
+            if (simulationStepped) { updateCubeVisuals(); updateDataHistory(); }
+            
+            drawGraph(magCtx, magnetizationCanvas, magnetizationHistory, "M", -1.0, 1.0, "#4fc3f7");
+            drawGraph(energyCtx, energyCanvas, energyHistory, "E/N³", -3.5, 0.5, "#ffb74d");
+
+            if (controls) controls.update();
+            if (renderer && scene && camera) renderer.render(scene, camera);
+        }
+
+        function main() {
+            initThreeJS();
+            setupDOMControls();
+            initializeSpins3D();
+            createSpinCubes();
+            updateDataHistory(); 
+            animate();
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', main);
+        } else {
+            main();
+        }
+    </script>
+</body>
+</html>

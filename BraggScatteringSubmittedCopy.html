@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D Bragg Scattering Simulation (Enhanced)</title>
+  <style>
+    body { margin: 0; background-color: #000; font-family: Monospace; }
+    #c   { width: 100%; height: 100vh; display: block; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.152.2/build/three.module.js"
+      }
+    }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+
+// =======================================================
+// 3D Bragg Scattering Simulation – Enhanced Visualisation
+// =======================================================
+//
+// This simulation models Bragg scattering of a Gaussian wave packet 
+// interacting with a 3D periodic lattice potential. The scenario captures 
+// the quantum mechanical behaviour of a spherical wavepacket as it 
+// approaches a regular lattice
+//
+// ------------------------
+// Physics and Mathematics:
+// ------------------------
+//
+// - The system is governed by the time-dependent Schrödinger equation:
+//     i ∂ψ/∂t = -½∇²ψ + V(x,y,z)ψ
+//
+// - We initialise a Gaussian wave packet, defined as:
+//     ψ(x,y,z) ∝ exp[-(r²)/(4σ²)] * exp[i(k₀ ⋅ r)]
+//   where σ determines the width and k₀ the initial momentum vector.
+//    r is the position vector r(x,y,z)
+//
+// - The potential V is constructed as a 3D lattice of Gaussian wells, 
+//   providing a periodic potential landscape akin to a crystal lattice.
+//   The lattice wraps around periodically (implementing periodic boundary 
+//   conditions), ensuring the wave packet remains within a bounded simulation.
+//
+// - Time evolution is performed using the split-step Fourier method:
+//     1. Apply half a timestep of the potential term in real space.
+//     2. Perform a forward 3D Fast Fourier Transform (FFT) to momentum space.
+//     3. Apply the kinetic term in momentum space.
+//     4. Perform the inverse 3D FFT back to real space.
+//     5. Apply the remaining half timestep of the potential term.
+//
+// - The kinetic phase factor used in Fourier space is:
+//     exp[-i (k_x² + k_y² + k_z²) Δt / 2]
+//   and the potential factor is:
+//     exp[-i V Δt / 2]
+//
+// - These steps conserve the norm of ψ and provide accurate simulation of 
+//   quantum mechanical evolution over time.
+//
+// ---------------------
+// Visual Representation:
+// ---------------------
+//
+// - The simulation volume is rendered using Three.js with a custom shader 
+//   employing ray-marching through a 3D texture of the wavefunction.
+// - The wavefunction’s amplitude and phase are mapped to colour and intensity:
+//     • Amplitude (|ψ|²) determines brightness (intensity).
+//     • Phase (arg(ψ)) is mapped to hue to reveal interference effects.
+// - The lattice sites are rendered as semi-transparent spheres to help 
+//   contextualise the scattering environment.
+//
+// ---------------------
+// Interactivity & Aesthetics:
+// ---------------------
+//
+// - The camera orbits the lattice smoothly to provide a dynamic perspective.
+// - Simulation parameters (like timestep, lattice depth, etc.) have been 
+//   adjusted for clarity and aesthetic balance in the visual output.
+//
+// This project brings together numerical quantum physics, efficient FFT-based 
+// solvers, and high-quality volumetric rendering to demonstrate Bragg scattering 
+// in a compelling and educational manner.
+//
+// Note: Under "Simulation Parmeters" dt has been set to dt=0.5 as its visually appealing
+// =======================================================
+
+
+    // Simulation parameters
+    const N = 64;
+    const dt = 0.5; // This seems to be the most aesthetically pleasing timestep by trial & error
+    const sigma0 = 5.0;
+    const k0 = new THREE.Vector3(0.4, 0.4, 0.0);       // initial momentum components
+    const V0 = 2.0;                                    // lattice well depth (enhanced for visuals)
+    const sigmaV = 3.0;
+    const latticeSpacing = 16;
+
+    // Allocate 3D arrays for wavefunction (real & imag) and potential
+    const psiRe = [], psiIm = [], V = [];
+    for (let i = 0; i < N; i++) {
+      psiRe[i] = []; psiIm[i] = []; V[i] = [];
+      for (let j = 0; j < N; j++) {
+        psiRe[i][j] = new Float32Array(N);
+        psiIm[i][j] = new Float32Array(N);
+        V[i][j]     = new Float32Array(N);
+      }
+    }
+
+    // Initialize Gaussian wave packet (offset in -x direction so it propagates into the lattice)
+    for (let ix = 0; ix < N; ix++) {
+      let x = ix - N * 0.25;
+      for (let iy = 0; iy < N; iy++) {
+        let y = iy - N/2;
+        for (let iz = 0; iz < N; iz++) {
+          let z = iz - N/2;
+          let r2 = x*x + y*y + z*z;
+          let amp   = Math.exp(-r2 / (4 * sigma0 * sigma0));
+          let phase = k0.x * x + k0.y * y + k0.z * z;
+          psiRe[ix][iy][iz] = amp * Math.cos(phase);
+          psiIm[ix][iy][iz] = amp * Math.sin(phase);
+        }
+      }
+    }
+
+    // Build a periodic 3D lattice potential of Gaussian wells
+    for (let ix = 0; ix < N; ix++) {
+      for (let iy = 0; iy < N; iy++) {
+        for (let iz = 0; iz < N; iz++) {
+          let pot = 0.0;
+          // Sum contributions from nearest lattice points (including periodic images)
+          for (let mx = -1; mx <= 1; mx++) {
+            for (let my = -1; my <= 1; my++) {
+              for (let mz = -1; mz <= 1; mz++) {
+                let cx = (Math.round(ix / latticeSpacing) + mx) * latticeSpacing;
+                let cy = (Math.round(iy / latticeSpacing) + my) * latticeSpacing;
+                let cz = (Math.round(iz / latticeSpacing) + mz) * latticeSpacing;
+                // Periodic wrap-around distance from (ix,iy,iz) to this lattice site
+                let dx = ix - cx; if (Math.abs(dx) > N/2) dx -= Math.sign(dx) * N;
+                let dy = iy - cy; if (Math.abs(dy) > N/2) dy -= Math.sign(dy) * N;
+                let dz = iz - cz; if (Math.abs(dz) > N/2) dz -= Math.sign(dz) * N;
+                pot += Math.exp(-(dx*dx + dy*dy + dz*dz) / (2 * sigmaV * sigmaV));
+              }
+            }
+          }
+          V[ix][iy][iz] = -V0 * pot;
+        }
+      }
+    }
+
+    // FFT 
+    function FFT(re, im) {
+      const n = re.length;
+      if (n <= 1) return;
+      const half = n >> 1;
+      const evenRe = new Float32Array(half), evenIm = new Float32Array(half);
+      const oddRe  = new Float32Array(half), oddIm  = new Float32Array(half);
+      for (let k = 0; k < half; k++) {
+        evenRe[k] = re[2*k];   evenIm[k] = im[2*k];
+        oddRe[k]  = re[2*k+1]; oddIm[k]  = im[2*k+1];
+      }
+      FFT(evenRe, evenIm);
+      FFT(oddRe, oddIm);
+      for (let k = 0; k < half; k++) {
+        let angle = -Math.PI * k / half;
+        let cosA = Math.cos(angle), sinA = Math.sin(angle);
+        let ro = cosA * oddRe[k] - sinA * oddIm[k];
+        let io = cosA * oddIm[k] + sinA * oddRe[k];
+        re[k]         = evenRe[k] + ro;
+        im[k]         = evenIm[k] + io;
+        re[k + half]  = evenRe[k] - ro;
+        im[k + half]  = evenIm[k] - io;
+      }
+    }
+
+    // Advance simulation by one time step (split-step method)
+    function stepSimulation() {
+      // Half-step potential kick: ψ = exp(-iV dt/2) ψ
+      for (let i = 0; i < N; i++)
+      for (let j = 0; j < N; j++)
+      for (let k = 0; k < N; k++) {
+        let theta = -0.5 * V[i][j][k] * dt;
+        let cosT = Math.cos(theta), sinT = Math.sin(theta);
+        let re = psiRe[i][j][k], im = psiIm[i][j][k];
+        psiRe[i][j][k] = re * cosT - im * sinT;
+        psiIm[i][j][k] = im * cosT + re * sinT;
+      }
+      // Kinetic kick via FFTs 
+      const lineRe = new Float32Array(N);
+      const lineIm = new Float32Array(N);
+      // FFT in X for each (y,z)
+      for (let j = 0; j < N; j++) {
+        for (let k = 0; k < N; k++) {
+          for (let i = 0; i < N; i++) { lineRe[i] = psiRe[i][j][k]; lineIm[i] = psiIm[i][j][k]; }
+          FFT(lineRe, lineIm);
+          for (let i = 0; i < N; i++) { psiRe[i][j][k] = lineRe[i]; psiIm[i][j][k] = lineIm[i]; }
+        }
+      }
+      // FFT in Y 
+      for (let i = 0; i < N; i++) {
+        for (let k = 0; k < N; k++) {
+          for (let j = 0; j < N; j++) { lineRe[j] = psiRe[i][j][k]; lineIm[j] = psiIm[i][j][k]; }
+          FFT(lineRe, lineIm);
+          for (let j = 0; j < N; j++) { psiRe[i][j][k] = lineRe[j]; psiIm[i][j][k] = lineIm[j]; }
+        }
+      }
+      // FFT in Z 
+      for (let i = 0; i < N; i++) {
+        for (let j = 0; j < N; j++) {
+          for (let k = 0; k < N; k++) { lineRe[k] = psiRe[i][j][k]; lineIm[k] = psiIm[i][j][k]; }
+          FFT(lineRe, lineIm);
+          for (let k = 0; k < N; k++) { psiRe[i][j][k] = lineRe[k]; psiIm[i][j][k] = lineIm[k]; }
+        }
+      }
+      // Multiply by kinetic energy exp(-r^2)
+      for (let i = 0; i < N; i++) {
+        let kx = (i <= N/2 ? i : i - N) * (2 * Math.PI / N);
+        for (let j = 0; j < N; j++) {
+          let ky = (j <= N/2 ? j : j - N) * (2 * Math.PI / N);
+          for (let k = 0; k < N; k++) {
+            let kz = (k <= N/2 ? k : k - N) * (2 * Math.PI / N);
+            let omega = -0.5 * (kx*kx + ky*ky + kz*kz) * dt;
+            let cosW = Math.cos(omega), sinW = Math.sin(omega);
+            let re = psiRe[i][j][k], im = psiIm[i][j][k];
+            psiRe[i][j][k] = re * cosW - im * sinW;
+            psiIm[i][j][k] = im * cosW + re * sinW;
+          }
+        }
+      }
+      // Take complex conjugate of ψ = ψ
+      for (let i = 0; i < N; i++)
+      for (let j = 0; j < N; j++)
+      for (let k = 0; k < N; k++) {
+        psiIm[i][j][k] = -psiIm[i][j][k];
+      }
+      // inverse FFT in X
+      for (let j = 0; j < N; j++) {
+        for (let k = 0; k < N; k++) {
+          for (let i = 0; i < N; i++) { lineRe[i] = psiRe[i][j][k]; lineIm[i] = psiIm[i][j][k]; }
+          FFT(lineRe, lineIm);
+          for (let i = 0; i < N; i++) { psiRe[i][j][k] = lineRe[i]; psiIm[i][j][k] = lineIm[i]; }
+        }
+      }
+      // inverse FFT in Y
+      for (let i = 0; i < N; i++) {
+        for (let k = 0; k < N; k++) {
+          for (let j = 0; j < N; j++) { lineRe[j] = psiRe[i][j][k]; lineIm[j] = psiIm[i][j][k]; }
+          FFT(lineRe, lineIm);
+          for (let j = 0; j < N; j++) { psiRe[i][j][k] = lineRe[j]; psiIm[i][j][k] = lineIm[j]; }
+        }
+      }
+      // invser FFT in Z
+      for (let i = 0; i < N; i++) {
+        for (let j = 0; j < N; j++) {
+          for (let k = 0; k < N; k++) { lineRe[k] = psiRe[i][j][k]; lineIm[k] = psiIm[i][j][k]; }
+          FFT(lineRe, lineIm);
+          for (let k = 0; k < N; k++) { psiRe[i][j][k] = lineRe[k]; psiIm[i][j][k] = lineIm[k]; }
+        }
+      }
+      // Normalise and undo conjugation
+      const norm = 1.0 / (N * N * N);
+      for (let i = 0; i < N; i++)
+      for (let j = 0; j < N; j++)
+      for (let k = 0; k < N; k++) {
+        psiRe[i][j][k] *= norm;
+        psiIm[i][j][k] = -psiIm[i][j][k] * norm;
+      }
+      // Half-step potential kick again
+      for (let i = 0; i < N; i++)
+      for (let j = 0; j < N; j++)
+      for (let k = 0; k < N; k++) {
+        let theta = -0.5 * V[i][j][k] * dt;
+        let cosT = Math.cos(theta), sinT = Math.sin(theta);
+        let re = psiRe[i][j][k], im = psiIm[i][j][k];
+        psiRe[i][j][k] = re * cosT - im * sinT;
+        psiIm[i][j][k] = im * cosT + re * sinT;
+      }
+    }
+
+    // Set up Three.js scene, camera, renderer (WebGL2)
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 1000);
+    const canvas = document.getElementById('c');
+    const gl = canvas.getContext('webgl2');
+    const renderer = new THREE.WebGLRenderer({ canvas: canvas, context: gl });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+
+    // Lighting: ambient + a point light (to softly illuminate lattice spheres)
+    scene.add(new THREE.AmbientLight(0x888888));
+    const pointLight = new THREE.PointLight(0xffffff, 1.0);
+    pointLight.position.set(N, N, 2 * N);
+    scene.add(pointLight);
+
+    // Add lattice spheres (semi-transparent grey at each lattice point)
+    const sphereGeom = new THREE.SphereGeometry(2, 16, 16);
+    const sphereMat = new THREE.MeshPhongMaterial({ color: 0x888888, opacity: 0.3, transparent: true });
+    const latticeCoords = [0, 16, 32, 48];
+    for (let ax of latticeCoords) {
+      for (let ay of latticeCoords) {
+        for (let az of latticeCoords) {
+          const sphere = new THREE.Mesh(sphereGeom, sphereMat);
+          sphere.position.set(ax, ay, az);
+          scene.add(sphere);
+        }
+      }
+    }
+
+    // Create a Data3DTexture for |psi> (2 channels: R=Re(ψ), G=Im(ψ))
+    const volumeData = new Float32Array(N * N * N * 2);
+    function updateTextureData() {
+      let p = 0;
+      for (let z = 0; z < N; z++) {
+        for (let y = 0; y < N; y++) {
+          for (let x = 0; x < N; x++) {
+            volumeData[p++] = psiRe[x][y][z];
+            volumeData[p++] = psiIm[x][y][z];
+          }
+        }
+      }
+    }
+    updateTextureData();  // initial texture content
+
+    const texture = new THREE.Data3DTexture(volumeData, N, N, N);
+    texture.format = THREE.RGFormat;
+    texture.type = THREE.FloatType;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.unpackAlignment = 1;
+    texture.needsUpdate = true;
+
+    // Shader material for volume rendering (ray-marching with additive blending)
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        u_data:    { value: texture },
+        u_size:    { value: new THREE.Vector3(N, N, N) },
+        cameraPos: { value: new THREE.Vector3() }
+      },
+      vertexShader: `
+        varying vec3 v_position;
+        void main() {
+          v_position = position;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        precision highp float;
+        precision highp sampler3D;
+        uniform sampler3D u_data;
+        uniform vec3 u_size;
+        uniform vec3 cameraPos;
+        varying vec3 v_position;
+        void main() {
+          // Compute viewing ray direction (from camera through the volume)
+          vec3 rayDir = normalize(v_position - cameraPos);
+          // Find intersection distance to far side of volume (box 0..u_size in each axis)
+          vec3 invDir = 1.0 / rayDir;
+          float tMaxX = (rayDir.x > 0.0) ? ((u_size.x - v_position.x) * invDir.x)
+                       : ((rayDir.x < 0.0) ? ((0.0 - v_position.x) * invDir.x) : 1e6);
+          float tMaxY = (rayDir.y > 0.0) ? ((u_size.y - v_position.y) * invDir.y)
+                       : ((rayDir.y < 0.0) ? ((0.0 - v_position.y) * invDir.y) : 1e6);
+          float tMaxZ = (rayDir.z > 0.0) ? ((u_size.z - v_position.z) * invDir.z)
+                       : ((rayDir.z < 0.0) ? ((0.0 - v_position.z) * invDir.z) : 1e6);
+          float t_exit = min(tMaxX, min(tMaxY, tMaxZ));
+          // Ray-march through the volume (80 samples from entry to exit)
+          int STEPS = 80;
+          vec3 step = rayDir * (t_exit / float(STEPS - 1));
+          vec3 samplePos = v_position;
+          vec3 accumColor = vec3(0.0);
+          for (int i = 0; i < 80; i++) {
+            vec4 psiSample = texture(u_data, samplePos / u_size);
+            float re = psiSample.r;
+            float im = psiSample.g;
+            // Compute intensity and phase of psi
+            float intensity = re*re + im*im;
+            float phase = atan(im, re);           // phase in [-pi, pi]
+            float normPhase = (phase + 3.141592653589793) / 6.283185307179586;  // to [0,1)
+            // Map phase (hue) to RGB color (saturation=1, value=1)
+            float h6 = normPhase * 6.0;
+            float r = clamp(abs(h6 - 3.0) - 1.0, 0.0, 1.0);
+            float g = clamp(2.0 - abs(h6 - 2.0), 0.0, 1.0);
+            float b = clamp(2.0 - abs(h6 - 4.0), 0.0, 1.0);
+            vec3 phaseColor = vec3(r, g, b);
+            // Additive color accumulation (scale intensity and add)
+            accumColor += phaseColor * intensity * 0.5;
+            samplePos += step;
+          }
+          // Gamma correction (sqrt) to enhance low-intensity parts
+          accumColor = pow(accumColor, vec3(0.5));
+          gl_FragColor = vec4(accumColor, 1.0);
+        }
+      `,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false
+    });
+
+    // Volume mesh (cube covering 0..N in each axis) using the shader material
+    const volumeGeom = new THREE.BoxGeometry(N, N, N);
+    volumeGeom.translate(N/2 - 0.5, N/2 - 0.5, N/2 - 0.5);  // align to [0,N] coordinate range
+    const volumeMesh = new THREE.Mesh(volumeGeom, material);
+    scene.add(volumeMesh);
+
+    // Update camera uniform initially
+    material.uniforms.cameraPos.value.copy(camera.position);
+
+    // Handle window resize
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Camera orbit setup
+    const center = new THREE.Vector3(N/2, N/2, N/2);
+    let angle = Math.PI / 4;                      // start at 45°
+    const orbitRadius = Math.sqrt(2) * (N * 1.2 - N/2);
+    const orbitHeight = N * 1.2 - N/2;
+
+    // Animation loop
+    function animate() {
+      // Step the simulation
+      stepSimulation();
+      // Update volume texture with new wavefunction data
+      updateTextureData();
+      texture.needsUpdate = true;
+      // Orbit camera slowly around Y-axis
+      angle += 0.002;
+      camera.position.x = center.x + orbitRadius * Math.cos(angle);
+      camera.position.z = center.z + orbitRadius * Math.sin(angle);
+      camera.position.y = center.y + orbitHeight;
+      camera.lookAt(center);
+      material.uniforms.cameraPos.value.copy(camera.position);
+      // Render frame
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    }
+
+    // Initialize camera and start animation
+    camera.position.set(
+      center.x + orbitRadius * Math.cos(angle),
+      center.y + orbitHeight,
+      center.z + orbitRadius * Math.sin(angle)
+    );
+    camera.lookAt(center);
+    material.uniforms.cameraPos.value.copy(camera.position);
+    animate();
+  </script>
+</body>
+</html>
