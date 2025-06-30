@@ -3,7 +3,7 @@ import numpy as np
 import random
 import math
 
-# --- Simulation Constants (keeping your aesthetics) ---
+# Simulation Constants
 CELL_SIZE = 12
 SIMULATION_DELAY = 100
 ROAD_SPAN_CELLS = 70
@@ -23,7 +23,7 @@ CAR_WIDTH_CELLS = 1.5  # Make cars wider
 CAR_VISUAL_THICKNESS_PIXELS = CELL_SIZE * 0.8
 CAR_COLORS = ["#E74C3C", "#3498DB", "#2ECC71", "#F1C40F", "#9B59B6", "#34495E", "#FF7F50", "#ADFF2F"]
 
-# --- LWR Model Parameters ---
+# LWR Model Parameters
 FREE_FLOW_SPEED = 5.0  # Maximum speed (cells/step)
 JAM_DENSITY = 0.5      # Maximum density (cars/cell)
 MIN_FOLLOWING_DISTANCE = CAR_LENGTH_CELLS + 2.0  # Minimum distance = car length + 2 cells (was +1)
@@ -83,18 +83,18 @@ class TrafficSimulationLWRFixed:
         self.master = master_window
         master_window.title("Traffic Simulation - LWR + Car Following Model")
 
-        # --- Core simulation state ---
+        # Core simulation state
         self.cars_in_lane = [[] for _ in range(TOTAL_NUM_LANES)]
         self.next_car_id_counter = 0
         self.step_count = 0
         self.cars_exited_this_step = [0] * TOTAL_NUM_LANES
 
-        # --- LWR intersection model ---
+        # LWR intersection model
         self.intersection_capacity = 0.2  # Lower capacity for more realistic intersection
         self.intersection_center = ROAD_SPAN_CELLS // 2
         self.intersection_zone = range(self.intersection_center - 4, self.intersection_center + 5)  # Larger intersection zone
 
-        # --- UI Controls (keeping your design) ---
+        # UI Controls
         self.inflow_rate_vars = [
             tk.DoubleVar(value=0.15), tk.DoubleVar(value=0.15),
             tk.DoubleVar(value=0.1), tk.DoubleVar(value=0.1)
@@ -102,7 +102,7 @@ class TrafficSimulationLWRFixed:
         self.global_max_speed_var = tk.DoubleVar(value=FREE_FLOW_SPEED)
         self.jam_density_var = tk.DoubleVar(value=JAM_DENSITY)
 
-        # --- Display variables (keeping your format) ---
+        # Display variables
         self.sim_step_display = tk.StringVar(value="Step: 0")
         self.num_cars_display = [tk.StringVar(value=f"Cars L{i}: 0") for i in range(TOTAL_NUM_LANES)]
         self.avg_speed_display = [tk.StringVar(value=f"Avg Spd L{i}: 0.00") for i in range(TOTAL_NUM_LANES)]
@@ -111,13 +111,13 @@ class TrafficSimulationLWRFixed:
         self.total_cars_display = tk.StringVar(value="Total Cars: 0")
         self.intersection_status_display = tk.StringVar(value="Intersection: FREE")
 
-        # --- Setup UI (keeping your layout) ---
+        # Setup UI
         self.setup_ui()
         self.is_running = False
         self.update_displays()
 
     def setup_ui(self):
-        # Main layout (exactly like yours)
+        # Main layout
         app_frame = tk.Frame(self.master)
         app_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -135,7 +135,7 @@ class TrafficSimulationLWRFixed:
         stats_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
         self.setup_stats_display(stats_frame)
 
-        # Canvas (same dimensions and colors)
+        # Canvas
         self.road_visual_span_pixels = ROAD_SPAN_CELLS * CELL_SIZE
         self.lane_visual_thickness_pixels = LANE_VISUAL_THICKNESS_CELLS * CELL_SIZE
         
@@ -145,7 +145,7 @@ class TrafficSimulationLWRFixed:
                                bg="#EAEAEA")
         self.canvas.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Lane positions (updated for wider roads)
+        # Lane positions
         road_center = self.road_visual_span_pixels / 2
         lane_width = self.lane_visual_thickness_pixels / 4  # Quarter of road width per lane
         
@@ -186,7 +186,7 @@ class TrafficSimulationLWRFixed:
         
         parent_frame.grid_columnconfigure(1, weight=1)
         
-        # Buttons (same style)
+        # Buttons
         button_frame = tk.Frame(parent_frame)
         button_frame.grid(row=row_idx, column=0, columnspan=2, pady=10, sticky="ew")
         button_frame.grid_columnconfigure(0, weight=1)
