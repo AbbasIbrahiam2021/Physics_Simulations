@@ -37,13 +37,13 @@ import tkinter as tk
 import numpy as np
 import math
 
-# ---------------- Simulation parameters ----------------
+#  Simulation parameters 
 TOTAL_TIME = 48.0  # total simulation time in seconds
 FPS = 20           # frames per second
 DT = 1.0 / FPS     # time step in seconds per frame
 dt_ms = int(1000 / FPS)  # time step in milliseconds for Tkinter scheduling
 
-# ---------------- Star physical properties -------------
+# Star physical properties 
 ALPHA = 1.0            # normalized thermal diffusivity
 INITIAL_R = 60         # radius (pixels) at main sequence
 GIANT_R = 150          # radius (pixels) at red giant phase
@@ -52,7 +52,7 @@ INITIAL_T_SURF = 0.7   # normalized surface temp at main sequence
 MIN_T_SURF = 0.3       # normalized surface temp at red giant
 FINAL_T_SURF = 0.9     # normalized surface temp at white dwarf
 
-# ---------------- Radial grid setup -------------------
+# Radial grid setup 
 MAX_R = GIANT_R
 N_RADIAL = MAX_R + 1
 
@@ -67,7 +67,7 @@ for r in range(N_RADIAL):
     else:
         T[r] = 0.0  # space beyond star is cold
 
-# ---------------- Tkinter GUI setup -------------------
+# Tkinter GUI
 root = tk.Tk()
 root.title("Red Giant → White Dwarf Collapse")
 canvas_size = 700
