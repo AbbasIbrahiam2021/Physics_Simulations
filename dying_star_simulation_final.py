@@ -137,14 +137,14 @@ def update_frame():
 
     T = np.clip(new_T, 0.0, 1.0)  # clamp to valid [0,1]
 
-    # --- Update surface temperature meter ---
+    # Update surface temperature meter
     surf_temp = T[R_star]
     bar_max_width = 680 - 552
     bar_width = int(bar_max_width * surf_temp)
     canvas.coords(surf_bar, 552, 92, 552 + bar_width, 128)
     canvas.itemconfig(surf_bar, fill='white')
 
-    # --- Render temperature rings ---
+    # Render temperature rings
     for r in range(N_RADIAL):
         col = temp_to_color(T[r])
         x0, y0 = cx - r, cy - r
@@ -152,10 +152,10 @@ def update_frame():
         canvas.coords(rings[N_RADIAL - 1 - r], x0, y0, x1, y1)
         canvas.itemconfig(rings[N_RADIAL - 1 - r], fill=col)
 
-    # --- Clear old magnetic field lines ---
+    # Clear old magnetic field lines
     canvas.delete('fieldline')
 
-    # --- Draw magnetic dipole field lines ---
+    # Draw magnetic dipole field lines
     # We use the equation r(θ) = C * sin²θ to trace each dipole field line,
     # where C is a constant defining each line's scale (lines of constant magnetic potential)
     min_lines, max_lines = 3, 20
@@ -194,7 +194,7 @@ def update_frame():
     if frame_count <= total_frames:
         root.after(dt_ms, update_frame)
 
-# ---------------- Launch simulation ----------------
+# Launch simulation 
 root.after(0, update_frame)
 root.mainloop()
 print("Simulation Finished")
